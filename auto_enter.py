@@ -78,19 +78,22 @@ def main():
     print("Please switch to the target window and leave your cursor in the input box...")
 
     # Countdown display
+    warning_printed = False
     while True:
         remaining = fire_ts - time.time()
         if remaining <= 0:
             break
             
         if remaining > 2.0:
-            sys.stdout.write(f"\r⏳ Waiting, time remaining: {remaining:.1f} seconds...")
+            sys.stdout.write(f"\r⏳ Waiting, time remaining: {remaining:.1f} seconds...   ")
             sys.stdout.flush()
-            time.sleep(0.5)
+            time.sleep(0.1)
         elif remaining > 0.2:
-            sys.stdout.write("\r" + " "*40 + "\r")
-            sys.stdout.write("⚠️ Get ready to fire (Keep window focused, do not move mouse)...\n")
-            sys.stdout.flush()
+            if not warning_printed:
+                sys.stdout.write("\r" + " "*60 + "\r")
+                sys.stdout.write("⚠️ Get ready to fire (Keep window focused, do not move mouse)...")
+                sys.stdout.flush()
+                warning_printed = True
             time.sleep(remaining - 0.2)
         else:
             # Busy wait for the last 200ms for precision
