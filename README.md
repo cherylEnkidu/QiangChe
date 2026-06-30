@@ -1,59 +1,141 @@
-# Auto-Enter Assistant
+# 自动回车助手（Auto-Enter Assistant）
 
-A high-precision script that automatically simulates pressing the "Enter" key at an exact specified time. This is useful for securing limited bookings, flash sales, or sending messages at precise moments.
+这个工具会在你指定的精确时刻，自动帮你按下 **回车（Enter）** 键。它非常适合用来抢有限的预约名额、秒杀抢购，或在精确的时间点发送消息——比手动操作更快、更稳。
 
-## Prerequisites
+你**不需要懂任何编程**就能使用它。只要按照下面的步骤，把每一条命令原样复制粘贴进去即可。
 
-- Python 3
-- `pyautogui` library
+---
 
-## Installation
+## 第一部分：安装设置（只需做一次）
 
-macOS restricts system-wide package installations. The recommended way to install and run this tool is by using an isolated Python Virtual Environment (`venv`).
+这一部分只在你第一次使用时操作一次。完成之后，以后每次使用都直接跳到**第二部分**即可。
 
-### Step 1: Set up a virtual environment
-Open your terminal, navigate to this directory, and run:
+### 第 1 步 —— 打开「终端」(Terminal)
+在 Mac 上按下 `Command (⌘) + 空格`，输入 **Terminal**（终端），然后按 **回车**。会弹出一个带文字光标的窗口，你就在这里输入命令。
+
+### 第 2 步 —— 进入工具所在的文件夹
+复制下面这行，粘贴到终端里，然后按 **回车**：
+
+```bash
+cd ~/QiangChe
+```
+
+> 💡 `cd` 的意思是「进入这个文件夹」。如果你把文件夹存在了别的位置，请把 `~/QiangChe` 换成你实际存放的位置。
+
+### 第 3 步 —— 创建一个独立的工作环境
+这样可以让工具的文件和你电脑里的其他东西分开，互不影响。粘贴后按 **回车**：
+
 ```bash
 python3 -m venv .venv
 ```
 
-### Step 2: Activate the virtual environment
+### 第 4 步 —— 启用这个工作环境
+粘贴后按 **回车**：
+
 ```bash
 source .venv/bin/activate
 ```
 
-### Step 3: Install dependencies
+### 第 5 步 —— 安装工具需要的唯一一个组件
+粘贴后按 **回车**：
+
 ```bash
 pip3 install pyautogui
 ```
 
-## Usage
+✅ 安装设置完成。第一部分以后再也不用重复了。
 
-While your virtual environment is active, you can run the script:
+---
+
+## 第二部分：使用工具（每次都这样做）
+
+### 第 1 步 —— 打开终端并进入文件夹
+打开终端（见第一部分第 1 步），然后粘贴下面两行，每行后面都按一次 **回车**：
 
 ```bash
-./auto_enter.py -t <TARGET_TIME> -l <LEAD_MILLISECONDS>
+cd ~/QiangChe
+source .venv/bin/activate
 ```
 
-### Examples
-Trigger the Enter key at exactly 6:00:00 PM with an 80ms lead time to account for network/processing delay:
+### 第 2 步 —— 运行工具
+根据你的需要，从下面的方式中选一种。
+
+#### 方式 A —— 在下一个整分钟触发（最简单）
+工具会等到下一个整分钟（比如 `3:24:00`），然后按下回车。它总是会给你留至少 5 秒的准备时间。如果下一个整分钟太近了（只剩 5 秒或更少），它会自动改为等待再下一个整分钟。
+
+```bash
+./auto_enter.py -n
+```
+
+#### 方式 B —— 在你指定的精确时间触发
+把 `18:00:00` 换成你的目标时间，使用 24 小时制（`18:00:00` 表示下午 6:00:00）：
+
+```bash
+./auto_enter.py -t 18:00:00
+```
+
+你也可以精确到毫秒：
+
+```bash
+./auto_enter.py -t 18:00:00.500
+```
+
+运行之后，**把鼠标点进你希望按下回车的那个框里**（比如消息输入框或「确认」按钮），然后等待即可。工具会显示倒计时，并在到点时帮你按下回车。
+
+---
+
+## 调整触发时机（可选）
+
+有时候你会希望回车**提前一点点**触发，用来抵消网络或网页的延迟。这个「提前量」用毫秒来计算（1000 毫秒 = 1 秒）。
+
+### 快捷预设：`--home` 和 `--work`
+工具内置了两个现成的提前量设置，这样你就不用去记具体数字：
+
+- `--home` → 提前 100 毫秒（默认值）
+- `--work` → 提前 100 毫秒（默认值）
+
+在命令里加上对应的词即可使用：
+
+```bash
+./auto_enter.py -n --home
+./auto_enter.py -t 18:00:00 --work
+```
+
+### 修改某个预设的数值
+如果你想让 `home` 或 `work` 使用不同的提前量，设置一次就会被记住：
+
+```bash
+./auto_enter.py set home 170
+./auto_enter.py set work 190
+```
+
+### 为单次运行手动设置提前量
+用 `-l` 后面跟毫秒数。它只对这一次运行生效，并会覆盖预设：
+
 ```bash
 ./auto_enter.py -t 18:00:00 -l 80
 ```
 
-Trigger the Enter key at 6:00:00.500 PM:
-```bash
-./auto_enter.py -t 18:00:00.500 -l 80
-```
+> 💡 这些可以混着用：`-n`（下一分钟）、预设（`--home` / `--work`）和 `-l` 可以同时使用。
 
-### Important: macOS Accessibility Permissions
-The first time you run this script on macOS, the system might block it from simulating keystrokes. 
-If nothing happens when the timer finishes:
-1. Go to **System Settings > Privacy & Security > Accessibility**.
-2. Make sure your Terminal app (or Python/IDE) is allowed to control your computer.
+---
 
-### Quitting the virtual environment
-When you are done using the script, simply type:
+## 用完之后
+
+要关闭这个独立工作环境，粘贴后按 **回车**：
+
 ```bash
 deactivate
 ```
+
+然后就可以关掉终端窗口了。
+
+---
+
+## 如果什么都没发生（Mac 权限问题）
+
+第一次使用时，macOS 可能出于安全考虑，阻止工具帮你按键。如果倒计时结束了但回车没有被按下：
+
+1. 打开 **系统设置 → 隐私与安全性 → 辅助功能**。
+2. 把 **终端（Terminal）**（或你用来运行工具的那个应用）旁边的开关**打开**。
+3. 再试一次。
