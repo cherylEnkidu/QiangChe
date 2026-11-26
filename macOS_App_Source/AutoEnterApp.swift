@@ -14,6 +14,29 @@ struct AutoEnterApp: App {
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if CommandLine.arguments.contains("--test-return") {
+            guard CGPreflightPostEventAccess() else {
+                print("测试停止：此应用缺少发送按键权限")
+                exit(2)
+            }
+            var receivedDown = false
+            NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { event in
+                if event.keyCode == 36 {
+                    if event.type == .keyDown { receivedDown = true }
+                    if receivedDown && event.type == .keyUp {
+                        print("测试窗口收到 Return 按下和释放")
+                        exit(0)
+                    }
+                    return nil
+                }
+                return event
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                _ = postReturn(to: ProcessInfo.processInfo.processIdentifier)
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { exit(3) }
+            return
+        }
         // Request Accessibility Permissions if we don't have them
         let options: NSDictionary = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String : true]
         let accessEnabled = AXIsProcessTrustedWithOptions(options)
@@ -28,6 +51,8 @@ struct ContentView: View {
     @State private var leadMsStr: String = "80"
     @State private var statusMsg: String = "空闲"
     @State private var isRunning = false
+
+    @State private var useWeChatRTT = false
 
     var body: some View {
         VStack(spacing: 20) {
@@ -59,8 +84,11 @@ struct ContentView: View {
                 TextField("80", text: $leadMsStr)
                     .textFieldStyle(RoundedBorderTextFieldStyle())
                     .frame(width: 80)
+                    .disabled(useWeChatRTT || isRunning)
             }
 
+            Toggle("微信 RTT 自动补偿", isOn: $useWeChatRTT)
+                .disabled(isRunning)
             Button(action: {
                 startTimer()
             }) {
@@ -76,11 +104,16 @@ struct ContentView: View {
                 .padding(.horizontal, 20)
         }
         .padding(30)
-        .frame(width: 480, height: 300)
+        .frame(width: 480, height: 350)
     }
 
     func startTimer() {
-        guard let leadMs = Int(leadMsStr) else {
+        guard CGPreflightPostEventAccess() else {
+            statusMsg = "没有发送按键权限。请在系统设置 → 隐私与安全性 → 辅助功能中启用此应用，再重新打开。"
+            return
+        }
+        let manualLead = Int(leadMsStr)
+        guard useWeChatRTT || manualLead != nil else {
             statusMsg = "无效的提前量"
             return
         }
@@ -96,18 +129,39 @@ struct ContentView: View {
         }
 
         let targetTimestamp = targetDate.timeIntervalSince1970
-        let fireTs = targetTimestamp - (Double(leadMs) / 1000.0)
-
-        if fireTs < Date().timeIntervalSince1970 {
-            statusMsg = "警告: 目标时间已过去！请等待至明天。"
+        guard targetDate > Date() else {
+            statusMsg = "目标时间已过，请重新设置。"
             return
         }
-
+        let automatic = useWeChatRTT
         isRunning = true
-        statusMsg = "已预约 \(targetTimeStr)。\n请立即切换到目标窗口！"
+        statusMsg = automatic ? "请点击目标输入框。将在目标前约 10 秒采样微信 RTT…" : "正在启动定时…"
 
-        // Run in background thread
         DispatchQueue.global(qos: .userInteractive).async {
+            let leadMs: Int
+            if automatic {
+                Thread.sleep(until: targetDate.addingTimeInterval(-10))
+                let count = max(1, min(10, Int(targetDate.timeIntervalSinceNow + 0.25)))
+                DispatchQueue.main.async { self.statusMsg = "正在采样微信 RTT（最多 \(count) 次）…" }
+                guard let measured = Self.weChatLead(count: count) else {
+                    DispatchQueue.main.async {
+                        self.isRunning = false
+                        self.statusMsg = "无法读取微信 RTT，请确认微信已联网后重试。"
+                    }
+                    return
+                }
+                leadMs = measured
+            } else {
+                leadMs = manualLead ?? 80
+            }
+            let fireTs = targetTimestamp - Double(leadMs) / 1000
+            guard fireTs > Date().timeIntervalSince1970 else {
+                DispatchQueue.main.async {
+                    self.isRunning = false
+                    self.statusMsg = "补偿后的触发时间已过，请重新设置。"
+                }
+                return
+            }
             var warningPrinted = false
             while true {
                 let now = Date().timeIntervalSince1970
@@ -118,7 +172,7 @@ struct ContentView: View {
                 
                 if remaining > 2.0 {
                     DispatchQueue.main.async {
-                        self.statusMsg = String(format: "⏳ 等待中... 剩余 %.1f 秒", remaining)
+                        self.statusMsg = String(format: "⏳ 等待中... 剩余 %.1f 秒（提前 %d ms）", remaining, leadMs)
                     }
                     Thread.sleep(forTimeInterval: 0.1)
                 } else if remaining > 0.2 {
@@ -134,32 +188,41 @@ struct ContentView: View {
                 }
             }
 
-            // Busy wait for the last 200ms
-            while true {
-                if Date().timeIntervalSince1970 >= fireTs {
-                    break
-                }
-            }
-
-            // Fire the enter key
-            self.pressEnter()
-
+            let front = NSWorkspace.shared.frontmostApplication
+            let posted = front.map { postReturn(to: $0.processIdentifier) } ?? false
+            let fired = Date()
             DispatchQueue.main.async {
                 self.isRunning = false
-                let finalFormatter = DateFormatter()
-                finalFormatter.dateFormat = "HH:mm:ss.SSS"
-                self.statusMsg = "✅ 已精确发送于 \(finalFormatter.string(from: Date()))！"
+                let formatter = DateFormatter()
+                formatter.dateFormat = "HH:mm:ss.SSS"
+                self.statusMsg = posted
+                    ? "已于 \(formatter.string(from: fired)) 向「\(front?.localizedName ?? "前台应用")」投递回车（提前 \(leadMs) ms）。"
+                    : "未投递回车，请检查辅助功能权限和前台窗口。"
             }
         }
     }
 
-    func pressEnter() {
-        let enterCode: CGKeyCode = 36 // 36 is the virtual key code for Return/Enter on macOS
-        guard let keyDown = CGEvent(keyboardEventSource: nil, virtualKey: enterCode, keyDown: true),
-              let keyUp = CGEvent(keyboardEventSource: nil, virtualKey: enterCode, keyDown: false) else {
-            return
-        }
-        keyDown.post(tap: .cghidEventTap)
-        keyUp.post(tap: .cghidEventTap)
+    private static func weChatLead(count: Int) -> Int? {
+        guard let script = Bundle.main.url(forResource: "wechat-rtt", withExtension: "sh") else { return nil }
+        let process = Process()
+        let output = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/bin/bash")
+        process.arguments = [script.path, String(count)]
+        process.standardOutput = output
+        do { try process.run() } catch { return nil }
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { return nil }
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        return String(data: data, encoding: .utf8).flatMap { Int($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
     }
+
+}
+
+private func postReturn(to pid: pid_t) -> Bool {
+    guard CGPreflightPostEventAccess(),
+          let down = CGEvent(keyboardEventSource: nil, virtualKey: 36, keyDown: true),
+          let up = CGEvent(keyboardEventSource: nil, virtualKey: 36, keyDown: false) else { return false }
+    down.postToPid(pid)
+    up.postToPid(pid)
+    return true
 }
